@@ -330,10 +330,16 @@ async def cb_test(callback: CallbackQuery):
     builder = InlineKeyboardBuilder()
     builder.button(text="А", callback_data="ans_A")
     builder.button(text="Б", callback_data="ans_B")
-    builder.button(text="В", callback_data="ans_V")
-    builder.button(text="Г", callback_data="ans_G")
+    builder.button(text="В", callback_data="ans_C")
+    builder.button(text="Г", callback_data="ans_D")
     builder.adjust(4)
-    await callback.message.answer(question, reply_markup=builder.as_markup())
+    # Отправляем вопрос без parse_mode — GigaChat может вернуть любые символы
+    try:
+        await callback.message.answer(question, reply_markup=builder.as_markup())
+    except Exception as send_err:
+        logger.warning(f"Question send failed ({send_err}), stripping markdown")
+        clean_q = question.replace("*", "").replace("_", "").replace("`", "")
+        await callback.message.answer(clean_q, reply_markup=builder.as_markup())
     await callback.answer()
 
 @dp.callback_query(F.data.startswith("ans_"))
@@ -352,7 +358,21 @@ async def cb_answer(callback: CallbackQuery):
     elif "банк" in topic.lower(): domain = "banking_ai"
     elif "ethics" in topic.lower() or "этик" in topic.lower(): domain = "ethics"
     profile["ratings"][domain] = min(5.0, profile["ratings"][domain] + 0.1)
-    await callback.message.edit_text(f"Ответ: *{answer}*\n\n{feedback}", reply_markup=None)
+    # Экранируем feedback от GigaChat — он может содержать Markdown-спецсимволы
+    safe_feedback = feedback.replace("_", "\\_").replace("*", "\\*").replace("[", "\\[").replace("`", "\\`")
+    try:
+        await callback.message.edit_text(
+            f"Ответ: *{answer}*\n\n{safe_feedback}",
+            reply_markup=None,
+            parse_mode="Markdown",
+        )
+    except Exception as edit_err:
+        logger.warning(f"edit_text failed: {edit_err} — sending as new message")
+        await callback.message.answer(
+            f"Ответ: *{answer}*\n\n{feedback}",
+            reply_markup=None,
+            parse_mode="Markdown",
+        )
     await callback.message.answer("Продолжим?", reply_markup=main_keyboard())
     await callback.answer()
 
